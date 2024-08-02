@@ -146,7 +146,7 @@ class Board:
         self.cannon_rank_magics = [Magic() for _ in range(100)]
         self.cannon_file_magics = [Magic() for _ in range(100)]
         self.initialize_actions()
-        # self.initialize_all_magics()
+        self.initialize_all_magics()
         self.legal_actions = []
 
     def initialize_actions(self):
@@ -292,9 +292,7 @@ class Board:
                 j += 1
             if not fail:
                 magic.attacks = used_attacks
-                print('it works!')
                 return magic.magic
-            key = magic.get_key(occupancies[j])
         print('nope, not working')
         return -1
 
@@ -360,25 +358,11 @@ class Board:
         # self.get_rook_actions_by_magic(self.turn)
         self.get_cannon_actions_by_magic(self.turn)
         # self.get_horse_actions_by_magic(self.turn)
-        # for i, action in enumerate(self.legal_actions):
-        #     if action:
-        #         print_bitboard(action)
-        #         print(i)
+        for i, action in enumerate(self.legal_actions):
+            if action:
+                print_bitboard(action)
+                print(i)
 
 
 board = Board()
-# print_bitboard_with_hidden_column(board.black_cannons)
-# print_bitboard(board.generate_horse_actions(50, 0))
-# print_bitboard(board.generate_rook_actions(45, board.mask[46]))
-# board.get_legal_action()
-# magic = board.cannon_file_magics[31]
-# board.generate_magic_numbers(31, generate_cannon_verticle_actions, magic)
-magic = board.rook_file_magics[1]
-board.generate_magic_numbers(1, generate_rook_verticle_actions, magic, 1)
-print_bitboard(magic.attack(0x80000800000000000000002))
-# print(board)
-# print_bitboard(magic.attacks[781])
-# for i, action in enumerate(magic.attacks):
-#     if action:
-#         print_bitboard(action)
-#         print(i)
+board.get_legal_action()
