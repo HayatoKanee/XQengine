@@ -1,86 +1,168 @@
+from random import Random
+
 import numpy as np
 
-from utils import print_bitboard, print_bitboard_with_files_ranks
+from utils import print_bitboard, print_bitboard_with_files_ranks, RED, BLACK, BLACK_SIDE, RED_SIDE, KING_AREA, \
+    DIAGONAL_DIRECTIONS, shift, DIRECTIONS, BOARD, get_x, get_y, print_bitboard_with_hidden_column, Direction, FILE_A, \
+    RANK_0, RANK_9, FILE_I, count_bits, get_ls1b_index, MASK, pop_bit, get_opponent_colour, STARTING_FEN, UPPER_MASK, \
+    LOWER_MASK
 
-RED_SIDE = 0x1FFFFFFFFFFF
-BLACK_SIDE = 0x3FFFFFFFFFFE00000000000
-BOARD = RED_SIDE | BLACK_SIDE
-KING_AREA = 0x70381C0000000000E07038
-RED = 0
-BLACK = 1
 
-NOT_A_FILE = 0x1FEFF7FBFDFEFF7FBFDFEFF
-NOT_I_FILE = 0x3FDFEFF7FBFDFEFF7FBFDFE
-NOT_9_RANK = 0x1FFFFFFFFFFFFFFFFFFFF
-NOT_0_RANK = 0x3FFFFFFFFFFFFFFFFFFFE00
+class Magic:
+    def __init__(self):
+        self.mask = 0
+        self.magic = 0
+        # It costs me a lot of time to figure out we need the second magic number..
+        self.high_magic = 0
+        self.rshift = 0
+        self.attacks = []
+        self.valid = True
 
-DIAGONAL_DIRECTIONS = [8, 10, -10, -8]
-DIRECTIONS = [9, 1, -1, -9]
+    def get_key(self, occupancy):
+        relevant_occupancy = occupancy & self.mask
+        return ((int((relevant_occupancy & UPPER_MASK) * self.high_magic >> 64) + int(
+            ((relevant_occupancy & LOWER_MASK) * self.magic))) & LOWER_MASK) >> self.rshift
+
+    def attack(self, occupancy):
+        index = self.get_key(occupancy)
+        return self.attacks[index]
+
+
+def generate_elephant_actions(index, blocker):
+    action = 0
+    for direction in DIAGONAL_DIRECTIONS:
+        elephant_eye = shift(direction, MASK[index])
+        if elephant_eye & blocker:
+            continue
+        action |= shift(direction, elephant_eye)
+    return action
+
+
+def generate_horse_actions(index, blocker):
+    action = 0
+
+    invalid_action = 0
+    for direction in DIRECTIONS:
+        invalid_action |= shift(direction, MASK[index])
+    for direction in DIRECTIONS:
+        intermediate_step = shift(direction, MASK[index])
+        if not intermediate_step & blocker:
+            for next_direction in DIAGONAL_DIRECTIONS:
+                final_pos = shift(next_direction, intermediate_step)
+                if not final_pos & invalid_action:
+                    action |= final_pos
+    return action
+
+
+def generate_rook_horizontal_actions(index, blocker):
+    action = 0
+    for direction in [Direction.EAST, Direction.WEST]:
+        pos = MASK[index]
+        while not pos & blocker and pos & BOARD:
+            pos = shift(direction, pos)
+            action |= pos
+    return action
+
+
+def generate_rook_verticle_actions(index, blocker):
+    action = 0
+    for direction in [Direction.NORTH, Direction.SOUTH]:
+        pos = MASK[index]
+        while not pos & blocker and pos & BOARD:
+            pos = shift(direction, pos)
+            action |= pos
+    return action
+
+
+def generate_cannon_horizontal_actions(index, blocker):
+    action = 0
+    for direction in [Direction.EAST, Direction.WEST]:
+        pos = MASK[index]
+        while True:
+            pos = shift(direction, pos)
+            if pos & blocker or not pos & BOARD:
+                break
+            action |= pos
+        while True:
+            pos = shift(direction, pos)
+            if pos & blocker:
+                action |= pos
+                break
+            if not pos & BOARD:
+                break
+    return action
+
+
+def generate_cannon_verticle_actions(index, blocker):
+    action = 0
+    for direction in [Direction.NORTH, Direction.SOUTH]:
+        pos = MASK[index]
+        while True:
+            pos = shift(direction, pos)
+            if pos & blocker or not pos & BOARD:
+                break
+            action |= pos
+        while True:
+            pos = shift(direction, pos)
+            if pos & blocker:
+                action |= pos
+                break
+            if not pos & BOARD:
+                break
+    return action
+
+
+def set_occupancy(index, mask):
+    occupancy = 0
+    for i in range(count_bits(mask)):
+        pos = get_ls1b_index(mask)
+        mask = pop_bit(mask, pos)
+        if index & (1 << i):
+            occupancy |= MASK[pos]
+    return occupancy
 
 
 class Board:
     def __init__(self):
-        self.red_pieces = 0
-        self.black_pieces = 0
+        self.pieces = [0 for _ in range(2)]
         self.turn_no = 0
-        self.red_pawns = 0
-        self.black_pawns = 0
-        self.red_cannons = 0
-        self.black_cannons = 0
-        self.red_rooks = 0
-        self.red_horses = 0
-        self.red_elephants = 0
-        self.red_advisors = 0
-        self.red_king = 0
-        self.black_rooks = 0
-        self.black_horses = 0
-        self.black_elephants = 0
-        self.black_advisors = 0
-        self.black_king = 0
+        self.pawns = 0
+        self.cannons = 0
+        self.rooks = 0
+        self.horses = 0
+        self.elephants = 0
+        self.advisors = 0
+        self.king = [0 for _ in range(2)]
         self.turn = RED
         self.reset()
-        self.mask = [1 << i for i in range(90)]
-        self.pawns_actions = [[0 for _ in range(90)] for _ in range(2)]
-        self.advisor_actions = [0 for _ in range(90)]
-        self.king_actions = [0 for _ in range(90)]
-        self.horse_blockers = [0 for _ in range(90)]
-        self.elephant_blockers = [0 for _ in range(90)]
-        self.rook_blockers = [0 for _ in range(90)]
-        self.cannon_blockers = [0 for _ in range(90)]
-        self.initialize_patterns()
-        for i, action in enumerate(self.rook_blockers):
-            if action:
-                print_bitboard(action)
-                print(i)
+        self.pawns_actions = [[0 for _ in range(100)] for _ in range(2)]
+        self.advisor_actions = [0 for _ in range(100)]
+        self.king_actions = [0 for _ in range(100)]
+        self.horse_magics = [Magic() for _ in range(100)]
+        self.elephant_magics = [Magic() for _ in range(100)]
+        self.rook_rank_magics = [Magic() for _ in range(100)]
+        # Splitting rank and file helps the magic number generation, I guess we can still do it even without splitting
+        self.rook_file_magics = [Magic() for _ in range(100)]
+        self.cannon_rank_magics = [Magic() for _ in range(100)]
+        self.cannon_file_magics = [Magic() for _ in range(100)]
+        self.initialize_actions()
+        # self.initialize_all_magics()
+        self.legal_actions = []
 
-    def initialize_patterns(self):
+    def initialize_actions(self):
         self.initialize_pawn_actions()
         self.initialize_advisor_actions()
         self.initialize_king_actions()
-        self.initialize_horse_blockers()
-        self.initialize_rook_cannon_blockers()
+        self.initialize_horse_magics()
+        self.initialize_elephant_magics()
+        self.initialize_rook_cannon_magics()
 
     def reset(self):
-        self.turn = RED
-        self.turn_no = 0
-        self.red_pawns = 0xAA8000000
-        self.black_pawns = 0x5540000000000000
-        self.red_cannons = 0x2080000
-        self.black_cannons = 0x41
-        self.red_rooks = 0x101
-        self.red_horses = 0x82
-        self.red_elephants = 0x44
-        self.red_advisors = 0x28
-        self.red_king = 4
-        self.black_rooks = 0x2020000
-        self.black_horses = 0x1040000
-        self.black_elephants = 0x880000
-        self.black_advisors = 0x500000
-        self.black_king = 85
-        self.red_pieces = 0xAAA0801FF
-        self.black_pieces = 0x3FE00415540000000000000
+        self.load_fen(STARTING_FEN)
 
     def load_fen(self, fen: str):
+        self.pieces[RED] = 0
+        self.pieces[BLACK] = 0
         bb_dict = {'p': 0,
                    'r': 0,
                    'b': 0,
@@ -88,13 +170,8 @@ class Board:
                    'a': 0,
                    'k': 0,
                    'c': 0,
-                   'P': 0,
-                   'R': 0,
-                   'B': 0,
-                   'N': 0,
-                   'A': 0,
-                   'K': 0,
-                   'C': 0}
+                   }
+
         fen_sector = fen.split()
         positions = fen_sector[0]
         self.turn_no = fen_sector[5]
@@ -102,107 +179,206 @@ class Board:
             self.turn = BLACK
         else:
             self.turn = RED
-        pos = 89
+        pos = 98
         for c in positions:
             if c == "/":
-                continue
-            if c.isdigit():
+                pos -= 1
+            elif c.isdigit():
                 pos -= int(c)
             else:
-                bb_dict[c] |= 1 << pos
+                bb_dict[c.lower()] |= 1 << pos
+                if c.islower():
+                    self.pieces[BLACK] |= 1 << pos
+                else:
+                    self.pieces[RED] |= 1 << pos
                 pos -= 1
 
-        self.red_pawns = bb_dict['P']
-        self.black_pawns = bb_dict['p']
-        self.red_cannons = bb_dict['C']
-        self.black_cannons = bb_dict['c']
-        self.red_rooks = bb_dict['R']
-        self.red_horses = bb_dict['N']
-        self.red_elephants = bb_dict['B']
-        self.red_advisors = bb_dict['A']
-        self.red_king = bb_dict['K']
-        self.black_rooks = bb_dict['r']
-        self.black_horses = bb_dict['n']
-        self.black_elephants = bb_dict['b']
-        self.black_advisors = bb_dict['a']
-        self.black_king = bb_dict['k']
+        self.pawns = bb_dict['p']
+        self.cannons = bb_dict['c']
+        self.rooks = bb_dict['r']
+        self.horses = bb_dict['n']
+        self.elephants = bb_dict['b']
+        self.advisors = bb_dict['a']
+        self.king = bb_dict['k']
 
     def initialize_pawn_actions(self):
         temp = 0
-        for i in range(27, 90):
-            self.pawns_actions[0][i] |= (self.mask[i] & NOT_9_RANK) << 9
-            if self.mask[i] & BLACK_SIDE:
-                self.pawns_actions[RED][i] |= (self.mask[i] & NOT_A_FILE) << 1
-                self.pawns_actions[RED][i] |= (self.mask[i] & NOT_I_FILE) >> 1
-        for i in range(62, -1, -1):
-            self.pawns_actions[BLACK][i] |= (self.mask[i] & NOT_0_RANK) >> 9
-            if self.mask[i] & RED_SIDE:
-                self.pawns_actions[BLACK][i] |= (self.mask[i] & NOT_A_FILE) << 1
-                self.pawns_actions[BLACK][i] |= (self.mask[i] & NOT_I_FILE) >> 1
+        for i in range(30, 100):
+            self.pawns_actions[RED][i] |= shift(Direction.NORTH, MASK[i])
+            if MASK[i] & BLACK_SIDE:
+                self.pawns_actions[RED][i] |= shift(Direction.WEST, MASK[i])
+                self.pawns_actions[RED][i] |= shift(Direction.EAST, MASK[i])
+        for i in range(68, -1, -1):
+            self.pawns_actions[BLACK][i] |= shift(Direction.SOUTH, MASK[i])
+            if MASK[i] & RED_SIDE:
+                self.pawns_actions[BLACK][i] |= shift(Direction.WEST, MASK[i])
+                self.pawns_actions[BLACK][i] |= shift(Direction.EAST, MASK[i])
 
     def initialize_advisor_actions(self):
-        for i in range(90):
+        for i in range(100):
             action = 0
-            if self.mask[i] & KING_AREA:
+            if MASK[i] & KING_AREA:
                 for direction in DIAGONAL_DIRECTIONS:
-                    action |= shift(direction, self.mask[i])
+                    action |= shift(direction, MASK[i])
                 action &= KING_AREA
                 self.advisor_actions[i] = action
 
     def initialize_king_actions(self):
-        for i in range(90):
+        for i in range(100):
             action = 0
-            if self.mask[i] & KING_AREA:
+            if MASK[i] & KING_AREA:
                 for direction in DIRECTIONS:
-                    action |= shift(direction, self.mask[i])
+                    action |= shift(direction, MASK[i])
                 action &= KING_AREA
                 self.king_actions[i] = action
 
-    def initialize_horse_blockers(self):
-        for i in range(90):
+    def initialize_horse_magics(self):
+        for i in range(100):
             blocker = 0
             for direction in DIRECTIONS:
-                blocker |= shift(direction, self.mask[i])
-            blocker &= BOARD
-            self.horse_blockers[i] = blocker
+                blocker |= shift(direction, MASK[i])
+            self.horse_magics[i].mask = blocker
 
-    def initialize_elephant_blockers(self):
-        for i in range(90):
+    def initialize_elephant_magics(self):
+        for i in range(100):
             blocker = 0
             for direction in DIAGONAL_DIRECTIONS:
-                blocker |= shift(direction, self.mask[i])
+                blocker |= shift(direction, MASK[i])
             blocker &= BOARD
-            self.elephant_blockers[i] = blocker
+            self.elephant_magics[i].mask = blocker
 
-    def initialize_rook_cannon_blockers(self):
-        for i in range(90):
-            file_mask = (~NOT_I_FILE & BOARD) << get_x(i) & BOARD & ~self.mask[i] & NOT_9_RANK & NOT_0_RANK
-            rank_mask = (~NOT_0_RANK & BOARD) << get_y(i) * 9 & BOARD & ~self.mask[i] & NOT_A_FILE & NOT_I_FILE
-            self.rook_blockers[i] = file_mask | rank_mask
-            self.cannon_blockers[i] = file_mask | rank_mask
+    def initialize_rook_cannon_magics(self):
+        for i in range(100):
+            if MASK[i]:
+                rank = RANK_0 << (10 * get_y(i)) & BOARD & ~MASK[i]
+                file = FILE_A << get_x(i) & BOARD & ~MASK[i]
+                self.rook_rank_magics[i].mask = rank
+                self.rook_file_magics[i].mask = file
+                self.cannon_rank_magics[i].mask = rank
+                self.cannon_file_magics[i].mask = file
 
-    def generate_elephant_actions(self, index, blocker):
-        action = 0
-        for direction in DIAGONAL_DIRECTIONS:
-            elephant_eye = shift(direction, self.mask[index])
-            if elephant_eye & blocker:
-                continue
-            action |= shift(direction, elephant_eye)
-        return action
+    def generate_magic_numbers(self, index, action_generator, magic, addition_hash_space=0):
+        if not MASK[index] or magic.mask == 0:
+            return
+        mask = magic.mask
+        count = count_bits(mask)
+        attack_table_size = 1 << (count + addition_hash_space)
+        magic.rshift = 64 - (count + addition_hash_space)
+        occupancies = [0 for _ in range(attack_table_size)]
+        attacks = [0 for _ in range(attack_table_size)]
+        for i in range(attack_table_size):
+            occupancies[i] = set_occupancy(i, mask)
+            attacks[i] = action_generator(index, occupancies[i])
+        fail = False
+        random = Random()
 
+        for i in range(100000000):
+            magic.magic = random.getrandbits(64)
+            magic.high_magic = random.getrandbits(64)
+            used_attacks = [0 for _ in range(attack_table_size)]
+            j = 0
+            fail = False
+            c = 0
+            keys = set()
+            occ_set = set()
+            while not fail and j < attack_table_size:
+                key = magic.get_key(occupancies[j])
+                occ_set.add(occupancies[j])
+                if not used_attacks[key]:
+                    c += 1
+                    used_attacks[key] = attacks[j]
+                elif used_attacks[key] != attacks[j]:
+                    fail = True
+                j += 1
+            if not fail:
+                magic.attacks = used_attacks
+                print('it works!')
+                return magic.magic
+            key = magic.get_key(occupancies[j])
+        print('nope, not working')
+        return -1
 
-def get_x(index):
-    return index % 9
+    def initialize_all_magics(self):
+        for i in range(100):
+            self.generate_magic_numbers(i, generate_rook_verticle_actions,
+                                        self.rook_file_magics[i], 4)
+            self.generate_magic_numbers(i, generate_rook_horizontal_actions,
+                                        self.rook_rank_magics[i], 2)
+            self.generate_magic_numbers(i, generate_cannon_verticle_actions,
+                                        self.cannon_file_magics[i], 4)
+            self.generate_magic_numbers(i, generate_cannon_horizontal_actions,
+                                        self.cannon_rank_magics[i], 2)
+            self.generate_magic_numbers(i, generate_horse_actions, self.horse_magics[i], 2)
+            self.generate_magic_numbers(i, generate_elephant_actions, self.elephant_magics[i], 0)
 
+    def get_rook_actions_by_magic(self, turn):
+        opponent_colour = get_opponent_colour(turn)
+        rooks = self.rooks & self.pieces[turn]
+        occupancy = self.pieces[turn] | self.pieces[opponent_colour]
+        count = count_bits(rooks)
+        for i in range(count):
+            index = get_ls1b_index(rooks)
+            rooks = pop_bit(rooks, index)
+            horizontal_action = self.rook_rank_magics[index].attack(occupancy)
+            vertical_action = self.rook_file_magics[index].attack(occupancy)
+            action = horizontal_action | vertical_action
+            block = action & self.pieces[turn]
+            legal_action = action ^ block
+            self.legal_actions[index] = legal_action
 
-def get_y(index):
-    return index // 9
+    def get_cannon_actions_by_magic(self, turn):
+        opponent_colour = get_opponent_colour(turn)
+        cannons = self.cannons & self.pieces[turn]
+        occupancy = self.pieces[turn] | self.pieces[opponent_colour]
+        count = count_bits(cannons)
+        for i in range(count):
+            index = get_ls1b_index(cannons)
+            cannons = pop_bit(cannons, index)
+            horizontal_action = self.cannon_rank_magics[index].attack(occupancy)
+            vertical_action = self.cannon_file_magics[index].attack(occupancy)
+            action = horizontal_action | vertical_action
+            block = action & self.pieces[turn]
+            legal_action = action ^ block
+            # legal_action = action
+            self.legal_actions[index] = legal_action
 
+    def get_horse_actions_by_magic(self, turn):
+        opponent_colour = get_opponent_colour(turn)
+        horses = self.horses & self.pieces[turn]
+        occupancy = self.pieces[turn] | self.pieces[opponent_colour]
+        count = count_bits(horses)
+        for i in range(count):
+            index = get_ls1b_index(horses)
+            horses = pop_bit(horses, index)
+            action = self.horse_magics[index].attack(occupancy)
+            block = action & self.pieces[turn]
+            legal_action = action ^ block
+            self.legal_actions[index] = legal_action
 
-def shift(direction, bitboard):
-    if direction > 0:
-        return (bitboard << direction) & BOARD
-    return (bitboard >> -direction) & BOARD
+    def get_legal_action(self):
+        self.legal_actions = [0 for _ in range(100)]
+        # self.get_rook_actions_by_magic(self.turn)
+        self.get_cannon_actions_by_magic(self.turn)
+        # self.get_horse_actions_by_magic(self.turn)
+        # for i, action in enumerate(self.legal_actions):
+        #     if action:
+        #         print_bitboard(action)
+        #         print(i)
 
 
 board = Board()
+# print_bitboard_with_hidden_column(board.black_cannons)
+# print_bitboard(board.generate_horse_actions(50, 0))
+# print_bitboard(board.generate_rook_actions(45, board.mask[46]))
+# board.get_legal_action()
+# magic = board.cannon_file_magics[31]
+# board.generate_magic_numbers(31, generate_cannon_verticle_actions, magic)
+magic = board.rook_file_magics[1]
+board.generate_magic_numbers(1, generate_rook_verticle_actions, magic, 1)
+print_bitboard(magic.attack(0x80000800000000000000002))
+# print(board)
+# print_bitboard(magic.attacks[781])
+# for i, action in enumerate(magic.attacks):
+#     if action:
+#         print_bitboard(action)
+#         print(i)
