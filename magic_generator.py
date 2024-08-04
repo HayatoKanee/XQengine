@@ -135,7 +135,6 @@ class MagicGenerator:
         self.generate_all_magics()
 
     def initialize_pawn_actions(self):
-        temp = 0
         for i in range(30, 100):
             self.pawns_actions[RED][i] |= shift(Direction.NORTH, MASK[i])
             if MASK[i] & BLACK_SIDE:
@@ -203,7 +202,8 @@ class MagicGenerator:
             occupancies[i] = set_occupancy(i, mask)
             attacks[i] = action_generator(index, occupancies[i])
         random = Random()
-        for i in range(100000000):
+        fail = True
+        while fail:
             magic.magic = random.getrandbits(64)
             magic.high_magic = random.getrandbits(64)
             used_attacks = [0 for _ in range(attack_table_size)]
