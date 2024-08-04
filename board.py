@@ -1,14 +1,8 @@
 import os
 import pickle
-from random import Random
-
-import numpy as np
 
 from magic_generator import MagicGenerator
-from utils import print_bitboard, print_bitboard_with_files_ranks, RED, BLACK, BLACK_SIDE, RED_SIDE, KING_AREA, \
-    DIAGONAL_DIRECTIONS, shift, DIRECTIONS, BOARD, get_x, get_y, print_bitboard_with_hidden_column, Direction, FILE_A, \
-    RANK_0, RANK_9, FILE_I, count_bits, get_ls1b_index, MASK, pop_bit, get_opponent_colour, STARTING_FEN, UPPER_MASK, \
-    LOWER_MASK
+from utils import *
 
 
 class Board:
@@ -23,14 +17,13 @@ class Board:
         self.advisors = 0
         self.king = []
         self.turn = RED
-        self.reset()
+        self.end = False
         self.pawns_actions = []
         self.advisor_actions = []
         self.king_actions = []
         self.horse_magics = []
         self.elephant_magics = []
         self.rook_rank_magics = []
-        # Splitting rank and file helps the magic number generation, I guess we can still do it even without splitting
         self.rook_file_magics = []
         self.cannon_rank_magics = []
         self.cannon_file_magics = []
@@ -74,6 +67,7 @@ class Board:
         fen_sector = fen.split()
         positions = fen_sector[0]
         self.turn_no = fen_sector[5]
+        self.end = False
         if fen_sector[1] == 'b':
             self.turn = BLACK
         else:
@@ -132,7 +126,7 @@ class Board:
             legal_action = action ^ block
             self.legal_actions[index] = legal_action
 
-    def get_legal_action(self):
+    def generate_legal_actions(self):
         self.legal_actions = [0 for _ in range(100)]
         self.generate_actions_by_magic(self.cannons, self.cannon_rank_magics, self.cannon_file_magics)
         self.generate_actions_by_magic(self.rooks, self.rook_rank_magics, self.rook_file_magics)
@@ -143,14 +137,94 @@ class Board:
         self.generate_normal_actions(MASK[self.king[self.turn]], self.king_actions)
         if get_x(self.king[RED]) == get_x(self.king[BLACK]):
             x = get_x(self.king[RED])
-            if count_bits(FILE_A << x & (self.pieces[RED] | self.pieces[BLACK])) == 2:
-                self.legal_actions[self.king[self.turn]] = MASK[self.king[get_opponent_colour(self.turn)]]
+            all_pieces = self.pieces[RED] | self.pieces[BLACK]
+            file = FILE_A << x
+            relevant_piece = all_pieces & file
+            blocker = False
+            red_king_found = False
+            black_king_found = False
+            while not blocker and relevant_piece and not black_king_found:
+                print_bitboard(relevant_piece)
+                ls1b = get_ls1b_index(relevant_piece)
+                if ls1b == self.king[RED]:
+                    red_king_found = True
+                    relevant_piece = pop_bit(relevant_piece, ls1b)
+                    continue
+                if red_king_found and ls1b != self.king[BLACK]:
+                    blocker = True
+                    break
+                elif red_king_found and ls1b == self.king[BLACK]:
+                    black_king_found = True
+                relevant_piece = pop_bit(relevant_piece, ls1b)
+            if not blocker:
+                self.legal_actions[self.king[self.turn]] |= MASK[self.king[get_opponent_colour(self.turn)]]
 
-        for i, action in enumerate(self.legal_actions):
-            if action:
-                print_bitboard(action)
-                print(i)
+    def check_action(self, action):
+        from_index, to_index = action
+        if self.legal_actions[from_index] & MASK[to_index]:
+            return True
+        return False
 
+    def generate_next_state(self, legal_action):
+        # apply the action
+        from_index, to_index = legal_action
+        opponent_colour = get_opponent_colour(self.turn)
+        capture = self.pieces[opponent_colour] & MASK[to_index]
+        if capture:
+            piece_type = self.convert_index_to_char(to_index).lower()
+            if piece_type == 'k':
+                self.end = True
+            else:
+                relevant_attr = convert_char_to_attr_name(piece_type)
+                setattr(self, relevant_attr, getattr(self, relevant_attr) ^ MASK[to_index])
+            self.pieces[opponent_colour] ^= MASK[to_index]
+        piece_type = self.convert_index_to_char(from_index).lower()
+        if piece_type == 'k':
+            self.king[self.turn] = to_index
+        else:
+            relevant_attr = convert_char_to_attr_name(piece_type)
+            setattr(self, relevant_attr, getattr(self, relevant_attr) ^ MASK[from_index])
+            setattr(self, relevant_attr, getattr(self, relevant_attr) ^ MASK[to_index])
+        self.pieces[self.turn] ^= MASK[from_index]
+        self.pieces[self.turn] ^= MASK[to_index]
+        self.turn += 1
+        self.turn = opponent_colour
 
-board = Board()
-board.get_legal_action()
+    def convert_index_to_char(self, index):
+        piece_mapping = {
+            (self.pawns & self.pieces[RED]): 'P',
+            (self.pawns & self.pieces[BLACK]): 'p',
+            (self.cannons & self.pieces[RED]): 'C',
+            (self.cannons & self.pieces[BLACK]): 'c',
+            (self.rooks & self.pieces[RED]): 'R',
+            (self.rooks & self.pieces[BLACK]): 'r',
+            (self.horses & self.pieces[RED]): 'N',
+            (self.horses & self.pieces[BLACK]): 'n',
+            (self.elephants & self.pieces[RED]): 'B',
+            (self.elephants & self.pieces[BLACK]): 'b',
+            (self.advisors & self.pieces[RED]): 'A',
+            (self.advisors & self.pieces[BLACK]): 'a',
+            MASK[self.king[RED]]: 'K',
+            MASK[self.king[BLACK]]: 'k'
+        }
+        for condition, symbol in piece_mapping.items():
+            if MASK[index] & condition:
+                return symbol
+        return '*'
+
+    def __str__(self):
+        s = ''
+        for i in range(9, -1, -1):
+            for j in range(8, -1, -1):
+                s += self.convert_index_to_char(j + i * 10)
+            s += '\n'
+        s = s.rstrip('\n')
+        files = "ABCDEFGHI"[::-1]
+        ranks = "9876543210"
+
+        output_with_labels = "  " + files + "\n"
+        for i, row in enumerate(s.split('\n')):
+            output_with_labels += ranks[i] + " " + row + "\n"
+        output_with_labels += "  " + files + "\n"
+
+        return output_with_labels

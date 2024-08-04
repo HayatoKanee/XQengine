@@ -1,3 +1,4 @@
+import re
 from enum import Enum
 
 import numpy as np
@@ -40,47 +41,40 @@ STARTING_FEN = 'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - 
 
 LOWER_MASK = 0xFFFFFFFFFFFFFFFF
 UPPER_MASK = 0xFFFFFFFFFFFFFFFF0000000000000000
+
+
 def get_opponent_colour(colour):
     if colour == BLACK:
         return RED
     return BLACK
 
 
-# seed = 999999999
-#
-#
-# def get_random_u32_number():
-#     number = seed
-#     number ^= np.uint32(number) << np.uint32(13)
-#     number ^= np.uint32(number) >> np.uint32(17)
-#     number ^= np.uint32(number) << np.uint32(5)
-#     return number
-#
-# def get_random_u64_number():
-#     n1 = np.uint64(get_random_u32_number()) & np.uint64(0xFFFF)
-#     n2 = np.uint64(get_random_u32_number()) & np.uint64(0xFFFF)
-#     n3 = np.uint64(get_random_u32_number()) & np.uint64(0xFFFF)
-#     n4 = np.uint64(get_random_u32_number()) & np.uint64(0xFFFF)
-#     return n1 | (n2 << np.uint64(16)) | (n3 << np.uint64(32)) | (n4 << np.uint64(48))
+def convert_rank_file_to_index(file_rank):
+    file = file_rank[0].upper()
+    rank = file_rank[1]
+    x = ord(file) - ord('A')
+    return convert_x_y_to_index(x, int(rank))
 
 
-def print_bitboard_with_files_ranks(bitboard):
-    bits = np.binary_repr(bitboard, 100)
-    rows = []
-    for i in range(0, 100, 10):
-        rows.append(bits[i + 1:i + 10])
-    formatted_output = '\n'.join(rows)
+def validate_human_input(h_input):
+    pattern = re.compile(r'^[a-iA-I][0-9][a-iA-I][0-9]$')
+    return pattern.match(h_input) is not None
 
-    # Add file and rank labels
-    files = reversed("ABCDEFGHI")
-    ranks = "9876543210"
 
-    output_with_labels = "  " + files + "\n"
-    for i, row in enumerate(formatted_output.split('\n')):
-        output_with_labels += ranks[i] + " " + row + "\n"
-    output_with_labels += "  " + files + "\n"
+def convert_x_y_to_index(x, y):
+    return x + y * 10
 
-    print(output_with_labels)
+
+def convert_char_to_attr_name(char):
+    char_mapping = {
+        'p': 'pawns',
+        'c': 'cannons',
+        'r': 'rooks',
+        'n': 'horses',
+        'b': 'elephants',
+        'a': 'advisors',
+    }
+    return char_mapping[char]
 
 
 def print_bitboard(bitboard):
