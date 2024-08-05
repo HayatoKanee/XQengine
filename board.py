@@ -34,6 +34,7 @@ class Board:
         if not os.path.exists('magic_numbers.pkl'):
             print("magic_numbers.pkl does not exist. Creating new MagicGenerator instance.")
             magic_generator = MagicGenerator()
+            magic_generator.generate_all_magics()
             magic_generator.save_to_file()
         else:
             file = open('magic_numbers.pkl', 'rb')
@@ -144,7 +145,6 @@ class Board:
             red_king_found = False
             black_king_found = False
             while not blocker and relevant_piece and not black_king_found:
-                print_bitboard(relevant_piece)
                 ls1b = get_ls1b_index(relevant_piece)
                 if ls1b == self.king[RED]:
                     red_king_found = True
@@ -158,6 +158,10 @@ class Board:
                 relevant_piece = pop_bit(relevant_piece, ls1b)
             if not blocker:
                 self.legal_actions[self.king[self.turn]] |= MASK[self.king[get_opponent_colour(self.turn)]]
+        for i, action in enumerate(self.legal_actions):
+            if action:
+                print_bitboard(action)
+                print(i)
 
     def check_action(self, action):
         from_index, to_index = action

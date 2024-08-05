@@ -132,7 +132,6 @@ class MagicGenerator:
         self.cannon_rank_magics = [Magic() for _ in range(100)]
         self.cannon_file_magics = [Magic() for _ in range(100)]
         self.initialize_actions()
-        self.generate_all_magics()
 
     def initialize_pawn_actions(self):
         for i in range(30, 100):
@@ -189,8 +188,13 @@ class MagicGenerator:
                 self.cannon_rank_magics[i].mask = rank
                 self.cannon_file_magics[i].mask = file
 
-    def generate_magic_numbers(self, index, action_generator, magic, addition_hash_space=0):
+    def generate_magic_numbers(self, index, action_generator, magic, addition_hash_space=0, writing_to_disk=False):
+        file_name = 'magics/' + action_generator.__name__.split('_')[1] + '_' + action_generator.__name__.split('_')[
+            2] + '.txt'
         if not MASK[index] or magic.mask == 0:
+            if writing_to_disk:
+                with open(file_name, 'a') as f:
+                    f.write("0x0 0x0\n")
             return
         mask = magic.mask
         count = count_bits(mask)
@@ -203,10 +207,18 @@ class MagicGenerator:
             attacks[i] = action_generator(index, occupancies[i])
         random = Random()
         fail = True
+        i = 0
+        max_j = 0
+        j = 0
         while fail:
+            i += 1
+            if i % 1000000 == 0:
+                print(
+                    f'Generating magics for {action_generator.__name__}[{index}]: {i}iterations, best result: {max_j}, target = {attack_table_size}')
             magic.magic = random.getrandbits(64)
             magic.high_magic = random.getrandbits(64)
             used_attacks = [0 for _ in range(attack_table_size)]
+            max_j = max(max_j, j)
             j = 0
             fail = False
             while not fail and j < attack_table_size:
@@ -218,8 +230,13 @@ class MagicGenerator:
                 j += 1
             if not fail:
                 magic.attacks = used_attacks
-                return magic.magic
-        print('nope, not working')
+                print(
+                    f'These two hexes are magic numbers for {action_generator.__name__}[{index}], using {i} iterations')
+                print(hex(magic.magic), hex(magic.high_magic))
+                if writing_to_disk:
+                    with open(file_name, 'a') as f:
+                        f.writelines(f"{hex(magic.magic)} {hex(magic.high_magic)}\n")
+                return magic.magic, magic.high_magic
 
     def initialize_actions(self):
         self.initialize_pawn_actions()
@@ -230,19 +247,72 @@ class MagicGenerator:
         self.initialize_rook_cannon_magics()
 
     def generate_all_magics(self):
-        for i in range(100):
+        for i in range(0, 100):
             self.generate_magic_numbers(i, generate_rook_vertical_actions,
-                                        self.rook_file_magics[i], 0)
+                                        self.rook_file_magics[i], 1, False)
             self.generate_magic_numbers(i, generate_rook_horizontal_actions,
-                                        self.rook_rank_magics[i], 0)
+                                        self.rook_rank_magics[i], 0, False)
             self.generate_magic_numbers(i, generate_cannon_vertical_actions,
-                                        self.cannon_file_magics[i], 0)
+                                        self.cannon_file_magics[i], 2, False)
             self.generate_magic_numbers(i, generate_cannon_horizontal_actions,
-                                        self.cannon_rank_magics[i], 0)
-            self.generate_magic_numbers(i, generate_horse_actions, self.horse_magics[i], 0)
-            self.generate_magic_numbers(i, generate_elephant_actions, self.elephant_magics[i], 0)
+                                        self.cannon_rank_magics[i], 0, False)
+            self.generate_magic_numbers(i, generate_horse_actions, self.horse_magics[i], 0, False)
+            self.generate_magic_numbers(i, generate_elephant_actions, self.elephant_magics[i], 0, False)
 
     def save_to_file(self):
         with open('magic_numbers.pkl', 'wb') as f:
             pickle.dump(self, f)
         print("MagicGenerator saved to magic_numbers.pkl")
+
+    def load_magic_numbers(self, file_name, magic_list):
+        with open('magics/' + file_name, 'r') as f:
+            for i in range(100):
+                if i % 9 == 0:
+                    continue
+                line = f.readline()
+                magic_numbers = line.split()
+                magic_list[i].magic = int(magic_numbers[0], 0)
+                magic_list[i].high_magic = int(magic_numbers[1], 0)
+
+    def generate_all_magics_with_pre_calculated_magic_numbers(self):
+        self.load_magic_numbers('rook_horizontal.txt', self.rook_rank_magics)
+        self.load_magic_numbers('rook_vertical.txt', self.rook_file_magics)
+        self.load_magic_numbers('elephant.txt', self.elephant_magics)
+        self.load_magic_numbers('horse.txt', self.horse_magics)
+        self.load_magic_numbers('cannon_horizontal.txt', self.cannon_rank_magics)
+        self.load_magic_numbers('cannon_vertical.txt', self.cannon_file_magics)
+        for i in range(100):
+            self.generate_attacks_with_pre_calculated_magic_numbers(i, generate_rook_vertical_actions,
+                                                                    self.rook_file_magics[i], 1)
+            self.generate_attacks_with_pre_calculated_magic_numbers(i, generate_rook_horizontal_actions,
+                                                                    self.rook_rank_magics[i])
+            self.generate_attacks_with_pre_calculated_magic_numbers(i, generate_elephant_actions,
+                                                                    self.elephant_magics[i])
+            self.generate_attacks_with_pre_calculated_magic_numbers(i, generate_horse_actions, self.horse_magics[i])
+            self.generate_attacks_with_pre_calculated_magic_numbers(i, generate_cannon_horizontal_actions,
+                                                                    self.cannon_rank_magics[i])
+            self.generate_attacks_with_pre_calculated_magic_numbers(i, generate_cannon_vertical_actions,
+                                                                    self.cannon_file_magics[i], 2)
+
+    def generate_attacks_with_pre_calculated_magic_numbers(self, index, action_generator, magic, addition_hash_space=0):
+        if not MASK[index] or magic.mask == 0:
+            return
+        mask = magic.mask
+        count = count_bits(mask)
+        attack_table_size = 1 << (count + addition_hash_space)
+        magic.rshift = 64 - (count + addition_hash_space)
+        occupancies = [0 for _ in range(attack_table_size)]
+        attacks = [0 for _ in range(attack_table_size)]
+        for i in range(attack_table_size):
+            occupancies[i] = set_occupancy(i, mask)
+            attacks[i] = action_generator(index, occupancies[i])
+        used_attacks = [0 for _ in range(attack_table_size)]
+        for i in range(attack_table_size):
+            key = magic.get_key(occupancies[i])
+            used_attacks[key] = attacks[i]
+        magic.attacks = used_attacks
+
+
+magic_generator = MagicGenerator()
+magic_generator.generate_all_magics()
+magic_generator.save_to_file()

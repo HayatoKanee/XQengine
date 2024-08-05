@@ -1,6 +1,6 @@
-import utils
 from board import Board
 from utils import *
+from magic_generator import MagicGenerator, Magic
 
 
 class Game:
@@ -13,13 +13,13 @@ class Game:
         else:
             self.board.reset()
         while not self.board.end:
+            self.board.generate_legal_actions()
             print(self.board)
             h_input = input("Enter your move: ")
             if not validate_human_input(h_input):
                 print("Example:a0a9")
                 continue
             action = (convert_rank_file_to_index(h_input[0:2]), convert_rank_file_to_index(h_input[2:4]))
-            self.board.generate_legal_actions()
             if not self.board.check_action(action):
                 print("Invalid move")
                 continue
