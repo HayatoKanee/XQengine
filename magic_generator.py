@@ -312,7 +312,3 @@ class MagicGenerator:
             used_attacks[key] = attacks[i]
         magic.attacks = used_attacks
 
-
-magic_generator = MagicGenerator()
-magic_generator.generate_all_magics()
-magic_generator.save_to_file()
